@@ -1369,7 +1369,7 @@ namespace ProtoBuf.Meta
         /// <summary>
         /// Create a deep clone of the supplied instance; any sub-items are also cloned.
         /// </summary>
-        public object DeepClone(object value)
+        public object DeepClone(object value, bool existingValue = false)
         {
             if (value == null) return null;
             Type type = value.GetType();
@@ -1389,8 +1389,11 @@ namespace ProtoBuf.Meta
                     ProtoReader reader = null;
                     try
                     {
+                        object useObj = null;
                         reader = ProtoReader.Create(ms, this, null, ProtoReader.TO_EOF);
-                        return Deserialize(key, null, reader);
+                        if (existingValue)
+                            useObj = Activator.CreateInstance(type);
+                        return Deserialize(key, useObj, reader);
                     }
                     finally
                     {

@@ -50,7 +50,6 @@ namespace ProtoBuf.Meta
         {
             metaType.ThrowIfFrozen();
             if (callback == null) return callback; // fine
-            if (callback.IsStatic) throw new ArgumentException("Callbacks cannot be static", nameof(callback));
             if (callback.ReturnType != model.MapType(typeof(void))
                 || !CheckCallbackParameters(model, callback))
             {

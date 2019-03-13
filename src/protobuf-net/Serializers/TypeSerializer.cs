@@ -291,7 +291,7 @@ namespace ProtoBuf.Serializers
                 }
                 if (handled)
                 {
-                    result = method.Invoke(obj, args);
+                    result = method.IsStatic ? method.Invoke(null, args) : method.Invoke(obj, args);
                 }
                 else
                 {
@@ -443,7 +443,7 @@ namespace ProtoBuf.Serializers
         {
             if (method != null)
             {
-                if (copyValue) ctx.CopyValue(); // assumes the target is on the stack, and that we want to *retain* it on the stack
+                if (copyValue && !method.IsStatic) ctx.CopyValue(); // assumes the target is on the stack, and that we want to *retain* it on the stack
                 ParameterInfo[] parameters = method.GetParameters();
                 bool handled = true;
 
@@ -526,11 +526,18 @@ namespace ProtoBuf.Serializers
             {
                 return;
             }
-            ctx.LoadAddress(valueFrom, ExpectedType);
+
+            if (!method.IsStatic)
+                ctx.LoadAddress(valueFrom, ExpectedType);
             EmitInvokeCallback(ctx, method, actuallyHasInheritance, null, forType);
 
             if (actuallyHasInheritance)
             {
+                // Make sure that the object is on the top of the stack.
+                // If the callback is non-static, it's already here from the EmitInvokeCallback call.
+                if (method.IsStatic)
+                    ctx.LoadAddress(valueFrom, ExpectedType);
+
                 Compiler.CodeLabel @break = ctx.DefineLabel();
                 for (int i = 0; i < serializers.Length; i++)
                 {
