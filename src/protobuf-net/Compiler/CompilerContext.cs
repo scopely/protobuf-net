@@ -44,7 +44,7 @@ namespace ProtoBuf.Compiler
         private void TraceCompile(string value)
         {
 #if DEBUG_COMPILE
-            if (!string.IsNullOrWhiteSpace(value))
+            if (!string.IsNullOrEmpty(value))
             {
                 using (System.IO.StreamWriter sw = System.IO.File.AppendText(traceCompilePath))
                 {

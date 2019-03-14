@@ -201,10 +201,10 @@ namespace ProtoBuf.Meta
         {
             if (IsValueType) throw new InvalidOperationException();
             CallbackSet callbacks = Callbacks;
-            callbacks.BeforeSerialize = ResolveMethod(beforeSerialize, true);
-            callbacks.AfterSerialize = ResolveMethod(afterSerialize, true);
-            callbacks.BeforeDeserialize = ResolveMethod(beforeDeserialize, true);
-            callbacks.AfterDeserialize = ResolveMethod(afterDeserialize, true);
+            callbacks.BeforeSerialize = ResolveMethod(beforeSerialize, null);
+            callbacks.AfterSerialize = ResolveMethod(afterSerialize, null);
+            callbacks.BeforeDeserialize = ResolveMethod(beforeDeserialize, null);
+            callbacks.AfterDeserialize = ResolveMethod(afterDeserialize, null);
             return this;
         }
 
@@ -290,13 +290,17 @@ namespace ProtoBuf.Meta
             return SetFactory(ResolveMethod(factory, false));
         }
 
-        private MethodInfo ResolveMethod(string name, bool instance)
+        private MethodInfo ResolveMethod(string name, bool? instance)
         {
             if (string.IsNullOrEmpty(name)) return null;
 #if COREFX
-            return instance ? Helpers.GetInstanceMethod(typeInfo, name) : Helpers.GetStaticMethod(typeInfo, name);
+            return instance.HasValue 
+                ? (instance.Value ? Helpers.GetInstanceMethod(typeInfo, name) : Helpers.GetStaticMethod(typeInfo, name))
+                : (Helpers.GetInstanceMethod(typeInfo, name) ?? Helpers.GetStaticMethod(typeInfo, name));
 #else
-            return instance ? Helpers.GetInstanceMethod(type, name) : Helpers.GetStaticMethod(type, name);
+            return instance.HasValue 
+                ? (instance.Value ? Helpers.GetInstanceMethod(type, name) : Helpers.GetStaticMethod(type, name))
+                : (Helpers.GetInstanceMethod(type, name) ?? Helpers.GetStaticMethod(type, name));
 #endif
         }
 
