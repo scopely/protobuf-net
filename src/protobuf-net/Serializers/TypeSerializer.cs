@@ -20,7 +20,7 @@ namespace ProtoBuf.Serializers
             }
             return false;
         }
-        private readonly Type forType, constructType;
+        private readonly Type forType, constructType, unknownConstructType;
 #if COREFX || PROFILE259
 		private readonly TypeInfo typeInfo;
 #endif
@@ -31,7 +31,7 @@ namespace ProtoBuf.Serializers
         private readonly CallbackSet callbacks;
         private readonly MethodInfo[] baseCtorCallbacks;
         private readonly MethodInfo factory;
-        public TypeSerializer(TypeModel model, Type forType, int[] fieldNumbers, IProtoSerializer[] serializers, MethodInfo[] baseCtorCallbacks, bool isRootType, bool useConstructor, CallbackSet callbacks, Type constructType, MethodInfo factory)
+        public TypeSerializer(TypeModel model, Type forType, int[] fieldNumbers, IProtoSerializer[] serializers, MethodInfo[] baseCtorCallbacks, bool isRootType, bool useConstructor, CallbackSet callbacks, Type constructType, MethodInfo factory, Type unknownConstructType)
         {
             Helpers.DebugAssert(forType != null);
             Helpers.DebugAssert(fieldNumbers != null);
@@ -75,6 +75,7 @@ namespace ProtoBuf.Serializers
             this.callbacks = callbacks;
             this.isRootType = isRootType;
             this.useConstructor = useConstructor;
+            this.unknownConstructType = unknownConstructType;
 
             if (baseCtorCallbacks != null && baseCtorCallbacks.Length == 0) baseCtorCallbacks = null;
             this.baseCtorCallbacks = baseCtorCallbacks;
@@ -153,7 +154,7 @@ namespace ProtoBuf.Serializers
                     return ser;
                 }
             }
-            if (actualType == constructType) return null; // needs to be last in case the default concrete type is also a known sub-type
+            if (actualType == constructType || actualType == unknownConstructType) return null; // needs to be last in case the default concrete type is also a known sub-type
             TypeModel.ThrowUnexpectedSubtype(forType, actualType); // might throw (if not a proxy)
             return null;
         }
@@ -237,7 +238,13 @@ namespace ProtoBuf.Serializers
                 if (!fieldHandled)
                 {
                     //Helpers.DebugWriteLine(": [" + fieldNumber + "] (unknown)");
-                    if (value == null) value = CreateInstance(source, true);
+                    if (value == null)
+                    {
+                        if (unknownConstructType != null)
+                            value = CreateUnknownInstance(source, true);
+                        else
+                            value = CreateInstance(source, true);
+                    }
                     if (isExtensible)
                     {
                         source.AppendExtensionData((IExtensible)value);
@@ -249,7 +256,13 @@ namespace ProtoBuf.Serializers
                 }
             }
             //Helpers.DebugWriteLine("<< Reading fields for " + forType.FullName);
-            if (value == null) value = CreateInstance(source, true);
+            if (value == null)
+            {
+                if (unknownConstructType != null)
+                    value = CreateUnknownInstance(source, true);
+                else
+                    value = CreateInstance(source, true);
+            }
             if (isRootType) { Callback(value, TypeModel.CallbackType.AfterDeserialize, source.Context); }
             return value;
         }
@@ -301,6 +314,7 @@ namespace ProtoBuf.Serializers
             }
             return result;
         }
+
         object CreateInstance(ProtoReader source, bool includeLocalCallback)
         {
             //Helpers.DebugWriteLine("* creating : " + forType.FullName);
@@ -329,6 +343,33 @@ namespace ProtoBuf.Serializers
             {
                 obj = BclHelpers.GetUninitializedObject(constructType);
             }
+            ProtoReader.NoteObject(obj, source);
+            if (baseCtorCallbacks != null)
+            {
+                for (int i = 0; i < baseCtorCallbacks.Length; i++)
+                {
+                    InvokeCallback(baseCtorCallbacks[i], obj, source.Context);
+                }
+            }
+            if (includeLocalCallback && callbacks != null) InvokeCallback(callbacks.BeforeDeserialize, obj, source.Context);
+            return obj;
+        }
+
+        object CreateUnknownInstance(ProtoReader source, bool includeLocalCallback)
+        {
+            object obj;
+#if PROFILE259
+	        ConstructorInfo constructorInfo = System.Linq.Enumerable.First(
+                unknownConstructType.GetTypeInfo().DeclaredConstructors, c => c.GetParameters().Length == 0);
+	        obj = constructorInfo.Invoke(new object[] {});
+
+#else
+            obj = Activator.CreateInstance(unknownConstructType
+#if !(CF || PORTABLE  || NETSTANDARD1_3 || NETSTANDARD1_4 || UAP)
+                , nonPublic: true
+#endif
+                );
+#endif
             ProtoReader.NoteObject(obj, source);
             if (baseCtorCallbacks != null)
             {
@@ -629,7 +670,10 @@ namespace ProtoBuf.Serializers
                     ctx.MarkLabel(tryNextField);
                 }
 
-                EmitCreateIfNull(ctx, loc);
+                if (unknownConstructType != null)
+                    EmitCreateUnknownIfNull(ctx, loc);
+                else
+                    EmitCreateIfNull(ctx, loc);
                 ctx.LoadReaderWriter();
                 if (isExtensible)
                 {
@@ -782,6 +826,25 @@ namespace ProtoBuf.Serializers
                 }
             }
         }
+
+        void EmitCreateUnknownInstance(Compiler.CompilerContext ctx)
+        {
+            ctx.EmitCtor(unknownConstructType);
+
+            ctx.CopyValue();
+            ctx.LoadReaderWriter();
+            ctx.EmitCall(ctx.MapType(typeof(ProtoReader)).GetMethod("NoteObject",
+                    BindingFlags.Static | BindingFlags.Public));
+
+            if (baseCtorCallbacks != null)
+            {
+                for (int i = 0; i < baseCtorCallbacks.Length; i++)
+                {
+                    EmitInvokeCallback(ctx, baseCtorCallbacks[i], true, null, forType);
+                }
+            }
+        }
+
         private void EmitCreateIfNull(Compiler.CompilerContext ctx, Compiler.Local storage)
         {
             Helpers.DebugAssert(storage != null);
@@ -792,6 +855,23 @@ namespace ProtoBuf.Serializers
                 ctx.BranchIfTrue(afterNullCheck, false);
 
                 ((IProtoTypeSerializer)this).EmitCreateInstance(ctx);
+
+                if (callbacks != null) EmitInvokeCallback(ctx, callbacks.BeforeDeserialize, true, null, forType);
+                ctx.StoreValue(storage);
+                ctx.MarkLabel(afterNullCheck);
+            }
+        }
+
+        private void EmitCreateUnknownIfNull(Compiler.CompilerContext ctx, Compiler.Local storage)
+        {
+            Helpers.DebugAssert(storage != null);
+            if (!Helpers.IsValueType(ExpectedType))
+            {
+                Compiler.CodeLabel afterNullCheck = ctx.DefineLabel();
+                ctx.LoadValue(storage);
+                ctx.BranchIfTrue(afterNullCheck, false);
+
+                EmitCreateUnknownInstance(ctx);
 
                 if (callbacks != null) EmitInvokeCallback(ctx, callbacks.BeforeDeserialize, true, null, forType);
                 ctx.StoreValue(storage);

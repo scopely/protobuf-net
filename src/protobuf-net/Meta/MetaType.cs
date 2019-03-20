@@ -415,7 +415,7 @@ namespace ProtoBuf.Meta
                 Type defaultType = null;
                 ResolveListTypes(model, type, ref itemType, ref defaultType);
                 ValueMember fakeMember = new ValueMember(model, ProtoBuf.Serializer.ListItemTag, type, itemType, defaultType, DataFormat.Default);
-                return new TypeSerializer(model, type, new int[] { ProtoBuf.Serializer.ListItemTag }, new IProtoSerializer[] { fakeMember.Serializer }, null, true, true, null, constructType, factory);
+                return new TypeSerializer(model, type, new int[] { ProtoBuf.Serializer.ListItemTag }, new IProtoSerializer[] { fakeMember.Serializer }, null, true, true, null, constructType, factory, unknownConstructType);
             }
             if (surrogate != null)
             {
@@ -481,7 +481,7 @@ namespace ProtoBuf.Meta
                 baseCtorCallbacks.CopyTo(arr, 0);
                 Array.Reverse(arr);
             }
-            return new TypeSerializer(model, type, fieldNumbers, serializers, arr, baseType == null, UseConstructor, callbacks, constructType, factory);
+            return new TypeSerializer(model, type, fieldNumbers, serializers, arr, baseType == null, UseConstructor, callbacks, constructType, factory, unknownConstructType);
         }
 
         [Flags]
@@ -1300,6 +1300,23 @@ namespace ProtoBuf.Meta
         }
 
         private Type constructType;
+
+        /// <summary>
+        /// The concrete type to create when a new instance of this type is needed; this may be useful when dealing
+        /// with dynamic proxies, or with interface-based APIs
+        /// </summary>
+        public Type UnknownConstructType
+        {
+            get { return unknownConstructType; }
+            set
+            {
+                ThrowIfFrozen();
+                unknownConstructType = value;
+            }
+        }
+
+        private Type unknownConstructType;
+        
         /// <summary>
         /// Adds a member (by name) to the MetaType
         /// </summary>     
